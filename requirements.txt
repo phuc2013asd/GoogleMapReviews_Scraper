@@ -1,0 +1,18 @@
+# Browser automation
+playwright==1.42.0
+
+# Data processing
+numpy==1.26.4
+pandas==2.2.0
+
+# Visualization
+matplotlib==3.8.2
+seaborn==0.13.2
+
+# Parsing
+beautifulsoup4==4.12.3
+lxml==5.1.0
+
+# Utilities
+requests==2.31.0
+tqdm==4.66.1
