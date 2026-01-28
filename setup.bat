@@ -1,12 +1,23 @@
 @echo off
+
+REM ===== Check if .venv already exists =====
+if exist ".venv\" (
+    echo =====================================
+    echo ERROR: Virtual environment .venv exists
+    echo Please delete it first or reuse it.
+    echo =====================================
+    pause
+    exit /b
+)
+
 echo ================================
 echo Create Python Virtual Environment
 echo ================================
 
-REM Tạo .venv
+REM Create .venv
 python -m venv .venv
 
-REM Kích hoạt .venv
+REM Activate .venv
 call .venv\Scripts\activate
 
 echo ================================
