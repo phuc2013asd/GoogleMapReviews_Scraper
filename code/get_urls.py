@@ -23,7 +23,7 @@ async def get_urls_from_page(url: str) -> List[str]:
             user_data_dir=PROFILE_DIR,
             headless=False,
             locale="vi-VN",
-            viewport={"width": 1280, "height": 800},
+            viewport={"width": 1280, "height": 720},
             args=[
                 "--disable-blink-features=AutomationControlled",
                 "--lang=vi-VN"
@@ -99,10 +99,10 @@ async def search_google_maps(query: str, location: str = "Việt Nam") -> List[s
             user_data_dir=PROFILE_DIR,
             headless=False,
             locale="vi-VN",
-            viewport={"width": 1280, "height": 800},
             args=[
                 "--disable-blink-features=AutomationControlled",
-                "--lang=vi-VN"
+                "--lang=vi-VN", "--start-maximized"
+
             ]
         )
         page = await browser.new_page()
@@ -202,7 +202,7 @@ async def search_and_save_urls(queries: List[str], output_file: str = "../urls.t
 if __name__ == "__main__":
     # Search Google Maps for restaurants nearby and save URLs
     queries = [
-        "quán ăn gần đây",
+        "quán ăn",
     ]
     
     urls = asyncio.run(search_and_save_urls(

@@ -9,8 +9,7 @@ async def run():
             user_data_dir="chrome_profile",
             headless=False,
             locale="vi-VN",
-            viewport={"width": 1280, "height": 800},
-            args=["--disable-blink-features=AutomationControlled"]
+            args=["--disable-blink-features=AutomationControlled", "--start-maximized"]
         )
 
         page = await browser.new_page()

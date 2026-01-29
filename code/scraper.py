@@ -12,8 +12,8 @@ URLS = open("urls.txt", encoding="utf-8").read().splitlines()
 PROFILE_DIR = "chrome_profile"
 OUTPUT_DIR = "output"
 
-MAX_REVIEWS = 50        # 0 = lấy hết
-SCROLL_DELAY = 2000    # ms
+MAX_REVIEWS = 0        # 0 = lấy hết
+SCROLL_DELAY = 1000    # ms
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 TIMESTAMP = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -36,10 +36,9 @@ async def run(url):
             user_data_dir=PROFILE_DIR,
             headless=False,
             locale="vi-VN",
-            viewport={"width": 1280, "height": 800},
             args=[
                 "--disable-blink-features=AutomationControlled",
-                "--lang=vi-VN"
+                "--lang=vi-VN", "--start-maximized"
             ]
         )
 
@@ -71,7 +70,7 @@ async def run(url):
         # =========================
         scroll_box = page.locator("div.m6QErb.DxyBCb.kA9KIf.dS8AEf")
         prev_count = 0
-
+    
         while True:
             review_blocks = page.locator("div.jftiEf")
             current_count = await review_blocks.count()
@@ -87,8 +86,37 @@ async def run(url):
             prev_count = current_count
             await scroll_box.evaluate(
                 "(el) => el.scrollTo(0, el.scrollHeight)"
-            )
+            )   
             await page.wait_for_timeout(SCROLL_DELAY)
+            
+        # =========================
+        # EXPAND ALL "XEM THÊM / MORE"
+        # =========================
+        print("🔄 Expanding all reviews...")
+
+        while True:
+            more_buttons = scroll_box.locator(
+                "button[aria-expanded='false'][jsaction*='review.expandReview'], "
+                "a.MtCSLb[role='button']:has-text('Xem thêm'), "
+                "a.MtCSLb[role='button']:has-text('More')"
+            )
+
+            count = await more_buttons.count()
+            if count == 0:
+                print("✅ No more expand buttons")
+                break
+
+            print(f"🔘 Expanding {count} buttons")
+
+            for _ in range(count):
+                try:
+                    btn = more_buttons.first
+                    await btn.scroll_into_view_if_needed()
+                    await page.wait_for_timeout(300)
+                    await btn.click(timeout=1000)
+                    await page.wait_for_timeout(300)
+                except:
+                    pass
 
         # =========================
         # READ REVIEWS
