@@ -2,13 +2,17 @@ import asyncio
 import csv
 import os
 from datetime import datetime
+from matplotlib import lines
 from playwright.async_api import async_playwright
 
 # =========================
 # CONFIG
 # =========================
+ 
 URLS = open("urls.txt", encoding="utf-8").read().splitlines()
-
+N = int(URLS[0])
+URLS = URLS[1:]
+UNSCRAPED_URLS = URLS[N:]
 PROFILE_DIR = "chrome_profile"
 OUTPUT_DIR = "output"
 
@@ -160,9 +164,13 @@ async def run(url):
 
 
 async def main():
-    for url in URLS:
+    count = 0
+    for url in UNSCRAPED_URLS:
         if url.strip():
             await run(url)
-
-
+            with open("urls.txt", "w", encoding="utf-8") as f:
+                count = count + 1
+                lines = [str(N+count)] + URLS
+                f.write("\n".join(lines))
+            
 asyncio.run(main())

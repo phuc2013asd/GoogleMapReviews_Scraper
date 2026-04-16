@@ -1,7 +1,9 @@
 import asyncio
 from playwright.async_api import async_playwright
 
-URL = open("urls.txt").read().split("\n")[0]
+URLS = open("urls.txt").read().split("\n")
+N = int(URLS[0])
+URL = URLS[1]
 
 async def run():
     async with async_playwright() as p:
@@ -15,10 +17,7 @@ async def run():
         page = await browser.new_page()
         await page.goto(URL, timeout=60000)
 
-        print("👉 Nếu Google yêu cầu đăng nhập, hãy đăng nhập thủ công")
-        print("👉 Sau khi vào được Google Maps, đóng trình duyệt")
-
-        await page.wait_for_timeout(60000)  # 1 phút cho bạn login
+        await page.wait_for_timeout(99999)  # 1 phút cho bạn login
 
         await browser.close()
 
