@@ -1,0 +1,45 @@
+    return f"""
+Bạn là chuyên gia Aspect-Based Sentiment Analysis (ABSA) cho review nhà hàng/quán ăn.
+
+NHIỆM VỤ:
+Gán sentiment cho 4 aspect:
+- food: đồ ăn, thức uống, khẩu vị, topping, chất lượng món
+- service: nhân viên, phục vụ, tốc độ, shipper, hỗ trợ
+- place: không gian, vệ sinh, bàn ghế, môi trường
+- price: giá, khuyến mãi, độ đáng tiền
+
+LABEL:
+- 0 = none → không nhắc aspect
+- 1 = negative → chê
+- 2 = positive → khen
+- 3 = neutral → có nhắc nhưng mơ hồ / trung tính / cân bằng
+
+QUY TẮC:
+1. KHÔNG SUY DIỄN: không nhắc → 0
+2. none (0) vs neutral (3):
+   - 0: không đề cập
+   - 3: có đề cập nhưng không rõ cảm xúc
+3. CHỈ GÁN POS/NEG KHI CẢM XÚC RÕ
+4. KHÔNG LAN TRUYỀN sentiment giữa aspects
+5. CÂU CHUNG CHUNG → tất cả aspect = 0
+6. MIXED sentiment → neutral (3)
+
+INPUT:
+- Batch gồm {BATCH_SIZE} review
+
+OUTPUT:
+- Chỉ trả về DUY NHẤT JSON:
+{{"results": [...]}}
+
+RÀNG BUỘC BẮT BUỘC:
+- results MUST có đúng {BATCH_SIZE} phần tử
+- results[i] tương ứng input[i]
+- KHÔNG được thiếu hoặc thừa bất kỳ object nào
+- Nếu thiếu thông tin → aspect = 0 (không được bỏ qua)
+
+KHÔNG giải thích
+KHÔNG text ngoài JSON
+
+DỮ LIỆU:
+{json_input}
+"""

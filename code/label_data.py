@@ -1,5 +1,4 @@
 import asyncio
-import glob
 import json
 import os
 import re
@@ -20,10 +19,15 @@ OUTPUT_DIR = "output_labeled"
 CHATGPT_URL = "https://chat.openai.com/chat"
 
 START_AT_INDEX = 0
-POST_GENERATION_DELAY = 2
+
 BATCH_SIZE = 20
-REFRESH_AFTER_BATCH = 5    
+POST_GENERATION_DELAY = 2
 SLEEP_BETWEEN_BATCH = 2
+REFRESH_AFTER_BATCH = 5
+
+MAX_RETRY = 3
+
+CHECKPOINT_FILE = os.path.join(OUTPUT_DIR, "checkpoint.txt")
 
 WAIT_ICON = 'svg use[href*="#bbf3a9"]'
 
@@ -41,26 +45,31 @@ REPLY_SELECTORS = [
 
 
 # ======================
+# CHECKPOINT
+# ======================
+
+def load_checkpoint():
+    if not os.path.exists(CHECKPOINT_FILE):
+        return START_AT_INDEX
+    with open(CHECKPOINT_FILE, "r") as f:
+        return int(f.read().strip())
+
+
+def save_checkpoint(index):
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    with open(CHECKPOINT_FILE, "w") as f:
+        f.write(str(index))
+
+
+# ======================
 # CSV HELPERS
 # ======================
 
-def find_input_csv(input_path=None):
-
-    # nếu có input thì dùng input
-    if input_path:
-        return input_path
-
-    # không thì dùng INPUT_FILE
-    return INPUT_FILE
-
-
 def load_existing_texts(path):
-
     if not os.path.exists(path):
         return set()
 
     df = pd.read_csv(path)
-
     if "text" not in df.columns:
         return set()
 
@@ -71,19 +80,7 @@ def load_existing_texts(path):
 # CHATGPT HELPERS
 # ======================
 
-async def scroll_to_bottom(page):
-
-    await page.evaluate("""
-        window.scrollTo({
-            top: document.body.scrollHeight,
-            behavior: "instant"
-        });
-    """)
-
-    await asyncio.sleep(1)
-    
 async def find_input_box(page):
-
     for sel in INPUT_SELECTORS:
         try:
             await page.wait_for_selector(sel, timeout=5000)
@@ -92,16 +89,13 @@ async def find_input_box(page):
                 return box
         except:
             pass
-
     raise RuntimeError("ChatGPT input box not found")
 
 
 async def wait_for_generation(page, timeout=120):
-
     start = time.time()
 
     while True:
-
         generating = await page.locator(WAIT_ICON).count() > 0
 
         if not generating:
@@ -115,32 +109,25 @@ async def wait_for_generation(page, timeout=120):
 
 
 async def get_last_reply(page):
-
     for sel in REPLY_SELECTORS:
-
         nodes = page.locator(sel)
         count = await nodes.count()
 
         if count > 0:
-
             last_node = nodes.nth(count - 1)
-
             text = await last_node.inner_text()
-
             if text.strip():
                 return text.strip()
 
-    raise RuntimeError("Failed to capture last ChatGPT reply")
+    raise RuntimeError("No reply found")
 
 
 # ======================
-# JSON EXTRACTION
+# JSON PARSER
 # ======================
 
 def extract_json(text):
-
     text = text.strip()
-
     text = re.sub(r"```json", "", text)
     text = re.sub(r"```", "", text)
 
@@ -150,7 +137,6 @@ def extract_json(text):
         pass
 
     match = re.search(r"\{[\s\S]*\}", text)
-
     if match:
         return json.loads(match.group())
 
@@ -161,8 +147,7 @@ def extract_json(text):
 # PROMPT
 # ======================
 
-def build_prompt(texts):
-
+def build_prompt(texts, batch_size):
     json_input = json.dumps(texts, ensure_ascii=False, indent=2)
 
     return f"""
@@ -196,7 +181,11 @@ INPUT:
 
 OUTPUT:
 - Chỉ trả về DUY NHẤT JSON:
-{{"results": [...]}}
+results:
+[
+  {{"food": 0, "service": 0, "place": 0, "price": 0}},
+  ...
+]
 
 RÀNG BUỘC BẮT BUỘC:
 - results MUST có đúng {BATCH_SIZE} phần tử
@@ -211,59 +200,68 @@ DỮ LIỆU:
 {json_input}
 """
 
+# ======================
+# GENERATION WITH RETRY
+# ======================
+
+async def generate_labels_batch(page, texts, batch_size):
+
+    for attempt in range(MAX_RETRY):
+
+        print(f"\nBatch attempt {attempt + 1}/{MAX_RETRY}")
+
+        input_box = await find_input_box(page)
+        prompt = build_prompt(texts, batch_size)
+
+        await input_box.click()
+
+        try:
+            await input_box.fill(prompt)
+        except:
+            await input_box.type(prompt, delay=5)
+
+        await input_box.press("Enter")
+
+        await wait_for_generation(page)
+
+        reply = await get_last_reply(page)
+        print("RAW:", reply[:300])
+
+        try:
+            data = extract_json(reply)
+        except Exception as e:
+            print("JSON parse fail:", e)
+            continue
+
+        if "results" not in data:
+            print("Missing results key")
+            continue
+
+        results = data["results"]
+
+        if len(results) != len(texts):
+            print(f"Mismatch: got {len(results)} expected {len(texts)}")
+            continue
+
+        return results
+
+    raise RuntimeError("Batch failed after retries")
+
 
 # ======================
-# LABEL GENERATION
+# SAVE
 # ======================
 
-async def generate_labels_batch(page, texts):
-
-    input_box = await find_input_box(page)
-
-    prompt = build_prompt(texts)
-
-    print("\nSending batch...")
-
-    await input_box.click()
-
-    try:
-        await input_box.fill(prompt)
-    except:
-        await input_box.type(prompt, delay=5)
-
-    await input_box.press("Enter")
-
-    await wait_for_generation(page)
-
-    reply = await get_last_reply(page)
-    print("Raw reply:\n", reply)
-
-    data = extract_json(reply)
-
-    if "results" not in data:
-        raise RuntimeError("Invalid JSON structure")
-
-    results = data["results"]
-
-    if len(results) != len(texts):
-        raise RuntimeError("Result length mismatch")
-
-    return results
-
-
-# ======================
-# SAVE BATCH
-# ======================
 def save_batch(rows, labels, out_path, existing_texts):
 
-    for row_obj, lab in zip(rows, labels):
+    for row, lab in zip(rows, labels):
 
-        new_row = row_obj.to_dict()
+        new_row = row.to_dict()
 
         new_row["food"] = lab["food"]
         new_row["service"] = lab["service"]
         new_row["place"] = lab["place"]
-        new_row["price"] = lab["price"]   # FIX HERE
+        new_row["price"] = lab["price"]
 
         df_out = pd.DataFrame([new_row])
 
@@ -283,25 +281,22 @@ def save_batch(rows, labels, out_path, existing_texts):
 
 async def run(input_csv=None, headless=False):
 
-    csv_path = find_input_csv(input_csv)
-
-    print("Input CSV:", csv_path)
-
+    csv_path = input_csv or INPUT_FILE
     df = pd.read_csv(csv_path)
-    df = df.iloc[START_AT_INDEX:]
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-    out_path = os.path.join(
-        OUTPUT_DIR,
-        f"google_maps_reviews_labeled_{ts}.csv"
-    )
-
-    print("Output:", out_path)
+    out_path = os.path.join(OUTPUT_DIR, f"labeled_{ts}.csv")
 
     existing_texts = load_existing_texts(out_path)
+
+    start_index = load_checkpoint()
+    print("Resume from index:", start_index)
+
+    df = df.iloc[start_index:]
+
+    global_index = start_index
 
     async with async_playwright() as p:
 
@@ -309,62 +304,61 @@ async def run(input_csv=None, headless=False):
             user_data_dir="chrome_profile",
             headless=headless,
             locale="vi-VN",
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--start-maximized",
-            ],
+            args=["--disable-blink-features=AutomationControlled"],
         )
 
         page = await browser.new_page()
-
         await page.goto(CHATGPT_URL)
 
-        batch_rows = []
-        batch_texts = []
+        batch_rows, batch_texts = [], []
         batch_counter = 0
-        
+
         for _, row in df.iterrows():
 
             text = str(row.get("text", "")).strip()
 
             if not text:
+                global_index += 1
                 continue
 
             if text in existing_texts:
+                global_index += 1
                 continue
 
             batch_rows.append(row)
             batch_texts.append(text)
 
             if len(batch_rows) < BATCH_SIZE:
+                global_index += 1
                 continue
 
-            print("Processing batch:", len(batch_rows))
+            print("\nProcessing batch...")
 
-            labels = await generate_labels_batch(page, batch_texts)
+            labels = await generate_labels_batch(page, batch_texts, len(batch_texts))
 
             save_batch(batch_rows, labels, out_path, existing_texts)
 
-            batch_rows = []
-            batch_texts = []
+            # ✅ SAVE CHECKPOINT
+            save_checkpoint(global_index + len(batch_rows))
 
+            batch_rows, batch_texts = [], []
             batch_counter += 1
 
             if batch_counter % REFRESH_AFTER_BATCH == 0:
-                print("Renew page...")
                 await page.goto(CHATGPT_URL)
 
             await asyncio.sleep(SLEEP_BETWEEN_BATCH)
 
+            global_index += 1
+
         if batch_rows:
-
-            labels = await generate_labels_batch(page, batch_texts)
-
+            labels = await generate_labels_batch(page, batch_texts, len(batch_texts))
             save_batch(batch_rows, labels, out_path, existing_texts)
+            save_checkpoint(global_index + len(batch_rows))
 
         await browser.close()
 
-    print("Finished labeling.")
+    print("DONE")
 
 
 # ======================
@@ -376,15 +370,9 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
-
     parser.add_argument("--input", "-i")
     parser.add_argument("--headless", action="store_true")
 
     args = parser.parse_args()
 
-    asyncio.run(
-        run(
-            input_csv=args.input,
-            headless=args.headless
-        )
-    )
+    asyncio.run(run(args.input, args.headless))
