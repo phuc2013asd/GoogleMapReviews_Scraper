@@ -14,15 +14,15 @@ from playwright.async_api import async_playwright
 # CONFIG
 # ======================
 
-INPUT_FILE = "labeled_progress_5.csv"
+INPUT_FILE = "output/preprocessed_filtered_reviews_sorted.csv"
 OUTPUT_DIR = "output_labeled"
 
 CHATGPT_URL = "https://chat.openai.com/chat"
 
-START_AT_INDEX = 8505#5320+280+280+440+200+460+1480
+START_AT_INDEX = 0
 POST_GENERATION_DELAY = 2
 BATCH_SIZE = 20
-REFRESH_AFTER_BATCH = 10    
+REFRESH_AFTER_BATCH = 5    
 SLEEP_BETWEEN_BATCH = 2
 
 WAIT_ICON = 'svg use[href*="#bbf3a9"]'
@@ -46,21 +46,12 @@ REPLY_SELECTORS = [
 
 def find_input_csv(input_path=None):
 
-    if input_path and os.path.exists(input_path):
+    # nếu có input thì dùng input
+    if input_path:
         return input_path
 
-    pattern = os.path.join(
-        os.path.dirname(__file__),
-        OUTPUT_DIR,
-        INPUT_FILE
-    )
-
-    files = glob.glob(pattern)
-
-    if not files:
-        raise FileNotFoundError("Input CSV not found")
-
-    return max(files, key=os.path.getmtime)
+    # không thì dùng INPUT_FILE
+    return INPUT_FILE
 
 
 def load_existing_texts(path):
@@ -175,24 +166,50 @@ def build_prompt(texts):
     json_input = json.dumps(texts, ensure_ascii=False, indent=2)
 
     return f"""
-            Bạn là một chuyên gia phân tích sắc thái (ABSA) cực kỳ khắt khe. 
-            Nhiệm vụ: Gán nhãn cảm xúc (0:None, 1:Neg, 2:Pos, 3:Neu) cho 4 khía cạnh: food (đồ ăn), service (phục vụ), place (không gian), cost (giá cả).
-            
-            QUY TẮC VÀNG:
-            1. CHỈ gán nhãn 1, 2, hoặc 3 nếu khía cạnh đó được NHẮC ĐẾN TRỰC TIẾP hoặc CÓ Ý CHỈ ĐẾN trong câu.
-            2. Nếu câu KHÔNG nhắc đến khía cạnh đó, BẮT BUỘC gán nhãn 0. Tuyệt đối không suy diễn.
-            3. Nhãn 3 (Neu) chỉ dùng khi có nhắc đến nhưng không khen cũng không chê (ví dụ: "Quán có bán cơm", "Đồ ăn bình thường"). Nếu câu thể hiện sự không hài lòng rõ rệt, phải dùng 1 (Neg).
-            
-            VÍ DỤ MẪU:
-            - "Đồ ăn ngon nhưng nhân viên thái độ": {{"food": 2, "service": 1, "place": 0, "cost": 0}}
-            - "Giá hơi cao so với chất lượng": {{"food": 0, "service": 0, "place": 0, "cost": 1}}
-            - "Mình sẽ quay lại": {{"food": 0, "service": 0, "place": 0, "cost": 0}} (Vì không nhắc khía cạnh cụ thể nào)
-            
-            DỮ LIỆU CẦN GÁN NHÃN:
-            {json_input}
-            
-            Trả về DUY NHẤT một JSON object có key "results" chứa danh sách các object con.
-            """
+Bạn là chuyên gia Aspect-Based Sentiment Analysis (ABSA) cho review nhà hàng/quán ăn.
+
+NHIỆM VỤ:
+Gán sentiment cho 4 aspect:
+- food: đồ ăn, thức uống, khẩu vị, topping, chất lượng món
+- service: nhân viên, phục vụ, tốc độ, shipper, hỗ trợ
+- place: không gian, vệ sinh, bàn ghế, môi trường
+- price: giá, khuyến mãi, độ đáng tiền
+
+LABEL:
+- 0 = none → không nhắc aspect
+- 1 = negative → chê
+- 2 = positive → khen
+- 3 = neutral → có nhắc nhưng mơ hồ / trung tính / cân bằng
+
+QUY TẮC:
+1. KHÔNG SUY DIỄN: không nhắc → 0
+2. none (0) vs neutral (3):
+   - 0: không đề cập
+   - 3: có đề cập nhưng không rõ cảm xúc
+3. CHỈ GÁN POS/NEG KHI CẢM XÚC RÕ
+4. KHÔNG LAN TRUYỀN sentiment giữa aspects
+5. CÂU CHUNG CHUNG → tất cả aspect = 0
+6. MIXED sentiment → neutral (3)
+
+INPUT:
+- Batch gồm {BATCH_SIZE} review
+
+OUTPUT:
+- Chỉ trả về DUY NHẤT JSON:
+{{"results": [...]}}
+
+RÀNG BUỘC BẮT BUỘC:
+- results MUST có đúng {BATCH_SIZE} phần tử
+- results[i] tương ứng input[i]
+- KHÔNG được thiếu hoặc thừa bất kỳ object nào
+- Nếu thiếu thông tin → aspect = 0 (không được bỏ qua)
+
+KHÔNG giải thích
+KHÔNG text ngoài JSON
+
+DỮ LIỆU:
+{json_input}
+"""
 
 
 # ======================
@@ -237,7 +254,6 @@ async def generate_labels_batch(page, texts):
 # ======================
 # SAVE BATCH
 # ======================
-
 def save_batch(rows, labels, out_path, existing_texts):
 
     for row_obj, lab in zip(rows, labels):
@@ -247,7 +263,7 @@ def save_batch(rows, labels, out_path, existing_texts):
         new_row["food"] = lab["food"]
         new_row["service"] = lab["service"]
         new_row["place"] = lab["place"]
-        new_row["cost"] = lab["cost"]
+        new_row["price"] = lab["price"]   # FIX HERE
 
         df_out = pd.DataFrame([new_row])
 
