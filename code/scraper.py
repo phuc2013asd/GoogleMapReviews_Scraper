@@ -96,13 +96,20 @@ async def run(page, url):
     await page.wait_for_timeout(2000)
     # =========================
     # SCROLL REVIEWS
+    # DỪNG KHI GẶP REVIEW 5 SAO
+    # HOẶC REVIEW RỖNG
     # =========================
 
-    scroll_box = page.locator("div.m6QErb.DxyBCb.kA9KIf.dS8AEf").first
+    scroll_box = page.locator(
+        "div.m6QErb.DxyBCb.kA9KIf.dS8AEf"
+    ).first
 
     previous_count = 0
     same_count_times = 0
     max_same_count = 3
+
+    stop_on_5_star = False
+    stop_on_empty = False
 
     while True:
 
@@ -110,6 +117,62 @@ async def run(page, url):
         current_count = await review_blocks.count()
 
         print(f"📦 {current_count} reviews")
+
+        # =========================
+        # CHECK LAST LOADED REVIEWS
+        # =========================
+
+        start_idx = max(previous_count - 5, 0)
+
+        for i in range(start_idx, current_count):
+
+            block = review_blocks.nth(i)
+
+            try:
+                rating_text = await block.locator(
+                    "span.kvMYJc"
+                ).get_attribute("aria-label")
+
+                # ví dụ:
+                # "5 sao"
+                # "5 stars"
+
+                if rating_text and ("5" in rating_text):
+                    print("🛑 Gặp review 5 sao -> dừng scroll")
+                    stop_on_5_star = True
+                    break
+
+            except:
+                pass
+
+            # =========================
+            # CHECK EMPTY REVIEW
+            # =========================
+
+            try:
+                text = ""
+
+                if await block.locator("span.wiI7pd").count() > 0:
+                    text = await block.locator(
+                        "span.wiI7pd"
+                    ).inner_text()
+
+                clean_text = text.strip()
+
+                # review rỗng / quá ngắn
+                if len(clean_text) < 5:
+                    print("🛑 Gặp review rỗng -> dừng scroll")
+                    stop_on_empty = True
+                    break
+
+            except:
+                pass
+
+        if stop_on_5_star:
+            break
+
+        if stop_on_empty:
+            break
 
         # đủ số lượng cần
         if MAX_REVIEWS > 0 and current_count >= MAX_REVIEWS:

@@ -203,14 +203,25 @@ DỮ LIỆU:
 # ======================
 # GENERATION WITH RETRY
 # ======================
+async def reset_chatgpt(page):
+    print("🔄 Reset ChatGPT...")
 
+    await page.goto(CHATGPT_URL)
+    await page.wait_for_load_state("networkidle")
+    await asyncio.sleep(3)
 async def generate_labels_batch(page, texts, batch_size):
 
     for attempt in range(MAX_RETRY):
 
         print(f"\nBatch attempt {attempt + 1}/{MAX_RETRY}")
 
-        input_box = await find_input_box(page)
+        try:
+            input_box = await find_input_box(page)
+        except:
+            print("❌ Input box not found")
+            await reset_chatgpt(page)
+            continue
+
         prompt = build_prompt(texts, batch_size)
 
         await input_box.click()
@@ -222,27 +233,36 @@ async def generate_labels_batch(page, texts, batch_size):
 
         await input_box.press("Enter")
 
-        await wait_for_generation(page)
+        try:
+            await wait_for_generation(page)
+            reply = await get_last_reply(page)
+        except Exception as e:
+            print("❌ Generation failed:", e)
+            await reset_chatgpt(page)
+            continue
 
-        reply = await get_last_reply(page)
         print("RAW:", reply[:300])
 
         try:
             data = extract_json(reply)
         except Exception as e:
-            print("JSON parse fail:", e)
+            print("❌ JSON parse fail:", e)
+            await reset_chatgpt(page)
             continue
 
         if "results" not in data:
-            print("Missing results key")
+            print("❌ Missing results key")
+            await reset_chatgpt(page)
             continue
 
         results = data["results"]
 
         if len(results) != len(texts):
-            print(f"Mismatch: got {len(results)} expected {len(texts)}")
+            print(f"❌ Mismatch: got {len(results)} expected {len(texts)}")
+            await reset_chatgpt(page)
             continue
 
+        # ✅ SUCCESS
         return results
 
     raise RuntimeError("Batch failed after retries")
@@ -308,7 +328,7 @@ async def run(input_csv=None, headless=False):
         )
 
         page = await browser.new_page()
-        await page.goto(CHATGPT_URL)
+        await reset_chatgpt(page)
 
         batch_rows, batch_texts = [], []
         batch_counter = 0
@@ -345,7 +365,7 @@ async def run(input_csv=None, headless=False):
             batch_counter += 1
 
             if batch_counter % REFRESH_AFTER_BATCH == 0:
-                await page.goto(CHATGPT_URL)
+                await reset_chatgpt(page)
 
             await asyncio.sleep(SLEEP_BETWEEN_BATCH)
 
